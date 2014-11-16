@@ -1,75 +1,125 @@
 var bcrypt = require('bcrypt-nodejs');
 var crypto = require('crypto');
-var mongoose = require('mongoose');
+var Sequelize = require('sequelize');
+var secrets = require('../config/secrets');
+var Promise = require('bluebird');
 
-var userSchema = new mongoose.Schema({
-  email: { type: String, unique: true, lowercase: true },
-  password: String,
+var sequelize = new Sequelize(secrets.db, {
+  storage: secrets.db_table,
+  logging: false
+});
 
-  facebook: String,
-  twitter: String,
-  google: String,
-  github: String,
-  instagram: String,
-  linkedin: String,
-  tokens: Array,
-
-  profile: {
-    name: { type: String, default: '' },
-    gender: { type: String, default: '' },
-    location: { type: String, default: '' },
-    website: { type: String, default: '' },
-    picture: { type: String, default: '' }
+var userSchema = sequelize.define('User', {
+  id: {
+    type: Sequelize.UUID,
+    defaultValue: Sequelize.UUIDV4,
+    primaryKey: true
+  },
+  email: {
+    type: Sequelize.STRING,
+    unique: true,
+    set: function (v) {
+      this.setDataValue('email', v.toLowerCase());
+    }
+  },
+  password: Sequelize.STRING,
+  facebook: Sequelize.STRING,
+  twitter: Sequelize.STRING,
+  google: Sequelize.STRING,
+  github: Sequelize.STRING,
+  instagram: Sequelize.STRING,
+  linkedin: Sequelize.STRING,
+  tokens: {
+    type: Sequelize.TEXT,
+    defaultValue: '[]',
+    get: function () {
+      var value = this.getDataValue('tokens');
+      return JSON.parse(value);
+    },
+    set: function (value) {
+      console.log('setting tokens to:', value);
+      console.log('type is', (typeof value));
+      console.log('stringified is', JSON.stringify(value || []));
+      this.setDataValue('tokens', JSON.stringify(value || []));
+    }
   },
 
-  resetPasswordToken: String,
-  resetPasswordExpires: Date
-});
+  name: {
+    type: Sequelize.STRING,
+    defaultValue: ''
+  },
+  gender: {
+    type: Sequelize.STRING,
+    defaultValue: ''
+  },
+  location: {
+    type: Sequelize.STRING,
+    defaultValue: ''
+  },
+  website: {
+    type: Sequelize.STRING,
+    defaultValue: ''
+  },
+  picture: {
+    type: Sequelize.STRING,
+    defaultValue: ''
+  },
 
-/**
- * Password hashing Mongoose middleware.
- */
+  resetPasswordToken: Sequelize.STRING,
+  resetPasswordExpires: Sequelize.DATE
+}, {
+  tableName: 'users',
+  instanceMethods: {
+    /**
+     * Helper method for validationg user's password.
+     */
+    comparePassword: function(candidatePassword, cb) {
+      bcrypt.compare(candidatePassword, this.getDataValue('password'), function(err, isMatch) {
+        if (err) { return cb(err); }
+        cb(null, isMatch);
+      });
+    },
 
-userSchema.pre('save', function(next) {
-  var user = this;
+    /**
+     * Helper method for getting user's gravatar.
+     */
+    gravatar: function(size) {
+      if (!size) { size = 200; }
 
-  if (!user.isModified('password')) { return next(); }
+      if (!this.getDataValue('email')) {
+        return 'https://gravatar.com/avatar/?s=' + size + '&d=retro';
+      }
 
-  bcrypt.genSalt(5, function(err, salt) {
-    if (err) { return next(err); }
+      var md5 = crypto.createHash('md5').update(this.getDataValue('email')).digest('hex');
+      return 'https://gravatar.com/avatar/' + md5 + '?s=' + size + '&d=retro';
+    }
+  },
+  hooks: {
+    beforeCreate: function(user, fn) {
+      return new Promise(function(resolve) {
+        bcrypt.genSalt(5, function(err, salt) {
+          bcrypt.hash(user.password, salt, null, function(err, hash) {
+            user.setDataValue('password', hash);
+            resolve();
+          });
+        });
+      });
+    },
+    beforeUpdate: function(user, fn) {
+      return new Promise(function(resolve) {
+        if (user._previousDataValues.password == user.password) {
+          return resolve();
+        }
 
-    bcrypt.hash(user.password, salt, null, function(err, hash) {
-      if (err) { return next(err); }
-      user.password = hash;
-      next();
-    });
-  });
-});
-
-/**
- * Helper method for validationg user's password.
- */
-
-userSchema.methods.comparePassword = function(candidatePassword, cb) {
-  bcrypt.compare(candidatePassword, this.password, function(err, isMatch) {
-    if (err) { return cb(err); }
-    cb(null, isMatch);
-  });
-};
-
-/**
- * Helper method for getting user's gravatar.
- */
-
-userSchema.methods.gravatar = function(size) {
-  if (!size) { size = 200; }
-
-  if (!this.email) {
-    return 'https://gravatar.com/avatar/?s=' + size + '&d=retro';
+        bcrypt.genSalt(5, function(err, salt) {
+          bcrypt.hash(user.password, salt, null, function(err, hash) {
+            user.setDataValue('password', hash);
+            resolve();
+          });
+        });
+      });
+    }
   }
+});
 
-  var md5 = crypto.createHash('md5').update(this.email).digest('hex');
-  return 'https://gravatar.com/avatar/' + md5 + '?s=' + size + '&d=retro';
-};
-
-module.exports = mongoose.model('User', userSchema);
+module.exports = userSchema;

@@ -18,7 +18,8 @@
 
 module.exports = {
 
-  db: process.env.MONGOLAB_URI || process.env.MONGODB || 'mongodb://localhost:27017/test',
+  db: process.env.SEQUELIZE_CONNECTION || 'postgres://trapps:trapps@localhost:5432/trapps',
+  db_table: process.env.SEQUELIZE_TABLE || 'trapps',
 
   sessionSecret: process.env.SESSION_SECRET || 'Your Session Secret goes here',
 
@@ -26,7 +27,7 @@ module.exports = {
     user: process.env.MAILGUN_USER || 'postmaster@sandbox697fcddc09814c6b83718b9fd5d4e5dc.mailgun.org',
     password: process.env.MAILGUN_PASSWORD || '29eldds1uri6'
   },
-  
+
   mandrill: {
     user: process.env.MANDRILL_USER || 'hackathonstarterdemo',
     password: process.env.MANDRILL_PASSWORD || 'E1K950_ydLR4mHw12a0ldA'
@@ -35,6 +36,11 @@ module.exports = {
   sendgrid: {
     user: process.env.SENDGRID_USER || 'hslogin',
     password: process.env.SENDGRID_PASSWORD || 'hspassword00'
+  },
+
+  gmail: {
+    user: process.env.GMAIL_USER || 'hslogin',
+    password: process.env.GMAIL_PASSWORD || 'hspassword00'
   },
 
   nyt: {

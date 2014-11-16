@@ -91,24 +91,27 @@ exports.postSignup = function(req, res, next) {
     return res.redirect('/signup');
   }
 
-  var user = new User({
+  var user = User.build({
     email: req.body.email,
     password: req.body.password
   });
 
-  User.findOne({ email: req.body.email }, function(err, existingUser) {
-    if (existingUser) {
-      req.flash('errors', { msg: 'Account with that email address already exists.' });
-      return res.redirect('/signup');
-    }
-    user.save(function(err) {
-      if (err) return next(err);
-      req.logIn(user, function(err) {
-        if (err) return next(err);
-        res.redirect('/');
+  User.findOne({ where: { email: req.body.email }})
+    .then(function(existingUser) {
+      if (existingUser) {
+        req.flash('errors', { msg: 'Account with that email address already exists.' });
+        return res.redirect('/signup');
+      }
+      return user.save().then(function() {
+        req.logIn(user, function(err) {
+          if (err) return next(err);
+          res.redirect('/');
+        });
       });
+    })
+    .catch(function(err) {
+      next(err);
     });
-  });
 };
 
 /**
@@ -128,19 +131,20 @@ exports.getAccount = function(req, res) {
  */
 
 exports.postUpdateProfile = function(req, res, next) {
-  User.findById(req.user.id, function(err, user) {
-    if (err) return next(err);
+  User.find(req.user.id).then(function(user) {
     user.email = req.body.email || '';
-    user.profile.name = req.body.name || '';
-    user.profile.gender = req.body.gender || '';
-    user.profile.location = req.body.location || '';
-    user.profile.website = req.body.website || '';
+    user.name = req.body.name || '';
+    user.gender = req.body.gender || '';
+    user.location = req.body.location || '';
+    user.website = req.body.website || '';
 
-    user.save(function(err) {
-      if (err) return next(err);
+    return user.save().then(function() {
       req.flash('success', { msg: 'Profile information updated.' });
       res.redirect('/account');
     });
+  })
+  .catch(function(err) {
+    return next(err);
   });
 };
 
@@ -161,16 +165,15 @@ exports.postUpdatePassword = function(req, res, next) {
     return res.redirect('/account');
   }
 
-  User.findById(req.user.id, function(err, user) {
-    if (err) return next(err);
-
-    user.password = req.body.password;
-
-    user.save(function(err) {
-      if (err) return next(err);
-      req.flash('success', { msg: 'Password has been changed.' });
-      res.redirect('/account');
-    });
+  User.find(req.user.id).then(function(user) {
+    return user.updateAttributes({password: req.body.password})
+      .then(function() {
+        req.flash('success', { msg: 'Password has been changed.' });
+        res.redirect('/account');
+      });
+  })
+  .catch(function(err) {
+    return next(err);
   });
 };
 
@@ -180,11 +183,15 @@ exports.postUpdatePassword = function(req, res, next) {
  */
 
 exports.postDeleteAccount = function(req, res, next) {
-  User.remove({ _id: req.user.id }, function(err) {
-    if (err) return next(err);
-    req.logout();
-    req.flash('info', { msg: 'Your account has been deleted.' });
-    res.redirect('/');
+  User.find(req.user.id).then(function(user) {
+    return user.destroy().then(function() {
+      req.logout();
+      req.flash('info', { msg: 'Your account has been deleted.' });
+      res.redirect('/');
+    });
+  })
+  .catch(function(err) {
+    return next(err);
   });
 };
 
@@ -196,17 +203,17 @@ exports.postDeleteAccount = function(req, res, next) {
 
 exports.getOauthUnlink = function(req, res, next) {
   var provider = req.params.provider;
-  User.findById(req.user.id, function(err, user) {
-    if (err) return next(err);
-
-    user[provider] = undefined;
+  User.find(req.user.id).then(function(user) {
+    user[provider] = null;
     user.tokens = _.reject(user.tokens, function(token) { return token.kind === provider; });
 
-    user.save(function(err) {
-      if (err) return next(err);
+    return user.save().then(function() {
       req.flash('info', { msg: provider + ' account has been unlinked.' });
       res.redirect('/account');
     });
+  })
+  .catch(function(err) {
+    return next(err);
   });
 };
 
@@ -220,9 +227,15 @@ exports.getReset = function(req, res) {
     return res.redirect('/');
   }
   User
-    .findOne({ resetPasswordToken: req.params.token })
-    .where('resetPasswordExpires').gt(Date.now())
-    .exec(function(err, user) {
+    .findOne({
+      where: {
+        resetPasswordToken: req.params.token,
+        resetPasswordExpires: {
+          gt: Date.now()
+        }
+      }
+    })
+    .then(function(user) {
       if (!user) {
         req.flash('errors', { msg: 'Password reset token is invalid or has expired.' });
         return res.redirect('/forgot');
@@ -253,32 +266,40 @@ exports.postReset = function(req, res, next) {
   async.waterfall([
     function(done) {
       User
-        .findOne({ resetPasswordToken: req.params.token })
-        .where('resetPasswordExpires').gt(Date.now())
-        .exec(function(err, user) {
+        .findOne({
+          where: {
+            resetPasswordToken: req.params.token,
+            resetPasswordExpires: {
+              gt: Date.now()
+            }
+          }
+        })
+        .then(function(user) {
           if (!user) {
             req.flash('errors', { msg: 'Password reset token is invalid or has expired.' });
             return res.redirect('back');
           }
 
           user.password = req.body.password;
-          user.resetPasswordToken = undefined;
-          user.resetPasswordExpires = undefined;
+          user.resetPasswordToken = null;
+          user.resetPasswordExpires = null;
 
-          user.save(function(err) {
-            if (err) return next(err);
+          return user.save().done(function() {
             req.logIn(user, function(err) {
               done(err, user);
             });
           });
+        })
+        .catch(function(err) {
+          return next(err);
         });
     },
     function(user, done) {
       var transporter = nodemailer.createTransport({
-        service: 'SendGrid',
+        service: 'Gmail',
         auth: {
-          user: secrets.sendgrid.user,
-          pass: secrets.sendgrid.password
+          user: secrets.gmail.user,
+          pass: secrets.gmail.password
         }
       });
       var mailOptions = {
@@ -337,7 +358,7 @@ exports.postForgot = function(req, res, next) {
       });
     },
     function(token, done) {
-      User.findOne({ email: req.body.email.toLowerCase() }, function(err, user) {
+      User.findOne({ where: { email: req.body.email.toLowerCase() }}).then(function(user) {
         if (!user) {
           req.flash('errors', { msg: 'No account with that email address exists.' });
           return res.redirect('/forgot');
@@ -346,17 +367,20 @@ exports.postForgot = function(req, res, next) {
         user.resetPasswordToken = token;
         user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
 
-        user.save(function(err) {
-          done(err, token, user);
+        return user.save().then(function() {
+          done(null, token, user);
         });
+      })
+      .catch(function(err) {
+        return next(err);
       });
     },
     function(token, user, done) {
       var transporter = nodemailer.createTransport({
-        service: 'SendGrid',
+        service: 'Gmail',
         auth: {
-          user: secrets.sendgrid.user,
-          pass: secrets.sendgrid.password
+          user: secrets.gmail.user,
+          pass: secrets.gmail.password
         }
       });
       var mailOptions = {
